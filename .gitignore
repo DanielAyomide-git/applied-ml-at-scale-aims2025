@@ -1,3 +1,8 @@
 venv
 *venv
 /venv
+/data
+*data
+data
+/ml-32m
+/ml-latest-small
