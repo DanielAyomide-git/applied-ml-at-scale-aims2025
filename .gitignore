@@ -6,3 +6,4 @@ venv
 data
 /ml-32m
 /ml-latest-small
+models/*.pkl
