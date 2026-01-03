@@ -11,6 +11,8 @@ class FitData:
         self.idx_to_user_id = []
         self.movie_id_to_idx = {}
         self.idx_to_movie_id = []
+        self.movie_id_to_genres = {}
+
 
         self.movie_id_to_title = {}  # store movie titles
 
@@ -65,7 +67,10 @@ class FitData:
                 for row in reader:
                     movie_id = int(row[0])
                     title = row[1]
+                    genres = row[2].split("|") if row[2] != "(no genres listed)" else []
                     self.movie_id_to_title[movie_id] = title
+                    self.movie_id_to_genres[movie_id] = genres
+                    
 
     def get_user_ratings(self, user_id):
         u_idx = self.user_id_to_idx[user_id]
