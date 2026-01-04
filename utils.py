@@ -4,6 +4,7 @@ import time
 import pickle
 import numpy as np
 import matplotlib.pyplot as plt
+import pandas as pd
 from numba import njit, prange
 
 class FitData:
@@ -107,14 +108,14 @@ class FitData:
 # Numba-optimized update functions
 # --------------------------
 @njit(parallel=True)
-def update_user_biases_numba(M, mu, lambd, U, V, item_biases,
+def update_user_biases_numba(M, mu, gamma, U, V, item_biases,
                              user_items_flat, user_items_ptr, user_items_len,
                              user_ratings_flat, user_biases):
     for m in prange(M):
         start = user_items_ptr[m]
         ln = user_items_len[m]
         num = 0.0
-        den = lambd
+        den = gamma  
         Um = U[m]
         for k in range(ln):
             idx = start + k
@@ -129,14 +130,14 @@ def update_user_biases_numba(M, mu, lambd, U, V, item_biases,
         user_biases[m] = num / den if den > 0.0 else 0.0
 
 @njit(parallel=True)
-def update_item_biases_numba(N, mu, lambd, U, V, user_biases,
+def update_item_biases_numba(N, mu, gamma, U, V, user_biases,
                              movie_users_flat, movie_users_ptr, movie_users_len,
                              movie_ratings_flat, item_biases):
     for n in prange(N):
         start = movie_users_ptr[n]
         ln = movie_users_len[n]
         num = 0.0
-        den = lambd
+        den = gamma
         Vn = V[n]
         for k in range(ln):
             idx = start + k
@@ -150,7 +151,7 @@ def update_item_biases_numba(N, mu, lambd, U, V, user_biases,
             den += 1.0
         item_biases[n] = num / den if den > 0.0 else 0.0
 @njit(parallel=True)
-def update_user_latent_numba(M, K, mu, lambd, U, V, user_biases, item_biases,
+def update_user_latent_numba(M, K, mu, tau, U, V, user_biases, item_biases,
                             user_items_flat, user_items_ptr, user_items_len,
                             user_ratings_flat):
     # Precompute V.T @ V for the entire dataset once to speed up "all-item" calculations
@@ -162,9 +163,9 @@ def update_user_latent_numba(M, K, mu, lambd, U, V, user_biases, item_biases,
         if ln == 0:
              continue
         
-        # A = V_batch.T @ V_batch + lambda * I
+        # A = V_batch.T @ V_batch + tau * I
         # b = V_batch.T @ (ratings - offset)
-        A = np.eye(K) * lambd
+        A = np.eye(K) * tau
         b = np.zeros(K)
         ub = user_biases[m]
         
@@ -185,10 +186,10 @@ def update_user_latent_numba(M, K, mu, lambd, U, V, user_biases, item_biases,
         U[m] = np.linalg.solve(A, b)
 
 @njit(parallel=True)
-def update_item_latent_numba(N, K, mu, lambd, U, V, user_biases, item_biases,
+def update_item_latent_numba(N, K, mu, tau, U, V, user_biases, item_biases,
                              movie_users_flat, movie_users_ptr, movie_users_len,
                              movie_ratings_flat):
-    eyes = np.eye(K) * lambd
+    eyes = np.eye(K) * tau
     for n in prange(N):
         start = movie_users_ptr[n]
         ln = movie_users_len[n]
@@ -232,11 +233,63 @@ def calc_rmse_numba(u_indices, m_indices, ratings, mu, U, V, user_biases, item_b
     return np.sqrt(sq_err / count)
 
 
+@njit(parallel=True)
+def calc_total_loss_numba(u_indices, m_indices, ratings, mu, U, V, user_biases, item_biases, tau, gamma):
+    """
+    Calculates the Total Loss (Negative Log-Likelihood) based on Slide 158.
+    
+    Formula: 
+    Loss = 0.5 * SSE + 0.5 * tau * (sum(U^2) + sum(V^2)) + 0.5 * gamma * (sum(bu^2) + sum(bi^2))
+    """
+    # 1. Calculate Sum of Squared Errors (SSE)
+    # This represents the Data Likelihood term
+    sse = 0.0
+    for i in prange(len(ratings)):
+        u = u_indices[i]
+        m = m_indices[i]
+        r = ratings[i]
+        
+        # Compute dot product U_m . V_n
+        dot = 0.0
+        for k in range(U.shape[1]):
+            dot += U[u, k] * V[m, k]
+            
+        # Prediction: mu + b_u + b_i + (U . V)
+        pred = mu + user_biases[u] + item_biases[m] + dot
+        sse += (r - pred)**2
+    
+    # 2. Calculate Latent Vector Regularization (tau)
+    reg_u = 0.0
+    for i in prange(U.shape[0]):
+        for k in range(U.shape[1]):
+            reg_u += U[i, k]**2
+            
+    reg_v = 0.0
+    for j in prange(V.shape[0]):
+        for k in range(V.shape[1]):
+            reg_v += V[j, k]**2
+
+    # 3. Calculate Bias Regularization (gamma)
+    reg_bu = 0.0
+    for i in prange(user_biases.shape[0]):
+        reg_bu += user_biases[i]**2
+        
+    reg_bi = 0.0
+    for j in prange(item_biases.shape[0]):
+        reg_bi += item_biases[j]**2
+
+    # Final Combination according to the probabilistic derivation
+    # total_loss = (Likelihood) + (Prior on Vectors) + (Prior on Biases)
+    total_loss = (0.5 * sse) + (0.5 * tau * (reg_u + reg_v)) + (0.5 * gamma * (reg_bu + reg_bi))
+    
+    return total_loss
+
 class ALSRecommender:
-    def __init__(self, fit_data, K=10, lambd=0.04, num_iters=10, test_ratio=0.2):
+    def __init__(self, fit_data, K=10, tau=0.1, gamma=0.01, num_iters=10, test_ratio=0.2):
         self.df = fit_data
         self.K = K
-        self.lambd = lambd
+        self.tau = tau
+        self.gamma = gamma  # For biases
         self.num_iters = num_iters
         self.test_ratio = test_ratio
         
@@ -310,26 +363,30 @@ class ALSRecommender:
         print(f"[LOG] Training ALS with K={self.K}...")
         for it in range(self.num_iters):
             t0 = time.time()
+            # 1. Update User Biases
             update_user_biases_numba(
-                self.M, self.mu, self.lambd, self.U, self.V, self.item_biases,
+                self.M, self.mu, self.gamma, self.U, self.V, self.item_biases,
                 self.user_items_flat, self.user_items_ptr, self.user_items_len,
                 self.user_ratings_flat, self.user_biases
             )
+            # 2. Update Item Biases
             update_item_biases_numba(
-                self.N, self.mu, self.lambd, self.U, self.V, self.user_biases,
+                self.N, self.mu, self.gamma, self.U, self.V, self.user_biases,
                 self.movie_users_flat, self.movie_users_ptr, self.movie_users_len,
                 self.movie_ratings_flat, self.item_biases
             )
+            # 3. Update User Latent Vectors
             update_user_latent_numba(
-                self.M, self.K, self.mu, self.lambd, self.U, self.V, self.user_biases, self.item_biases,
+                self.M, self.K, self.mu, self.tau, self.U, self.V, self.user_biases, self.item_biases,
                 self.user_items_flat, self.user_items_ptr, self.user_items_len, self.user_ratings_flat
             )
+            # 4. Update Item Latent Vectors
             update_item_latent_numba(
-                self.N, self.K, self.mu, self.lambd, self.U, self.V, self.user_biases, self.item_biases,
+                self.N, self.K, self.mu, self.tau, self.U, self.V, self.user_biases, self.item_biases,
                 self.movie_users_flat, self.movie_users_ptr, self.movie_users_len, self.movie_ratings_flat
             )
             
-            # Metrics (Approximate Train RMSE for speed)
+            # Metrics
             sample_size = min(100000, len(self.train_users))
             idx = np.random.choice(len(self.train_users), sample_size, replace=False)
             rmse_train = calc_rmse_numba(self.train_users[idx], self.train_items[idx], self.train_ratings[idx],
@@ -372,12 +429,12 @@ def run_multi_k_training(fit_data, k_values=[2, 10, 20], num_iters=20):
         print(f"\n================ STARTING K={K} (Iterations={num_iters}) ================")
         
         # Pass num_iters here
-        model = ALSRecommender(fit_data, K=K, lambd=0.1, num_iters=num_iters) 
+        model = ALSRecommender(fit_data, K=K, tau=0.01, num_iters=num_iters) 
         
         model.train_test_split()
         model.fit()
         
-        filename = f"als_model_k{K}.pkl"
+        filename = f"models/als_model_k{K}.pkl"
         model.save_model(filename)
         results[K] = model 
         
@@ -447,7 +504,7 @@ def load_and_test_pickle(filename, fit_data_obj):
     with open(filename, 'rb') as f:
         model = pickle.load(f)
     
-    print(f"  > Loaded Model K={model.K}, Lambda={model.lambd}")
+    print(f"  > Loaded Model K={model.K}, tau={model.tau}")
     print(f"  > Final Test RMSE stored: {model.rmse_test_hist[-1]:.4f}")
     
     # Sanity Check Prediction
@@ -513,22 +570,22 @@ def optimize_single_user(model, user_idx, rated_item_indices, ratings, num_iters
     based on new ratings.
     """
     K = model.K
-    lambd = model.lambd
+    tau = model.tau
     
     # Slice the V matrix to get only the movies the user rated
     V_batch = model.V[rated_item_indices]  # shape: (n_rated, K)
     item_biases_batch = model.item_biases[rated_item_indices]
     
-    # Pre-calculate V^T * V + lambda * I (This is the 'A' matrix in Ax=b)
+    # Pre-calculate V^T * V + tau * I (This is the 'A' matrix in Ax=b)
     # Note: For a single user with few ratings, we can do this simply
-    A = np.dot(V_batch.T, V_batch) + np.eye(K) * lambd
+    A = np.dot(V_batch.T, V_batch) + np.eye(K) * tau
     
     for _ in range(num_iters):
         # Update User Bias
-        # b_u = sum(r - mu - b_i - U.V) / (n_ratings + lambda)
+        # b_u = sum(r - mu - b_i - U.V) / (n_ratings + tau)
         pred_ratings = np.dot(V_batch, model.U[user_idx])
         errors = ratings - model.mu - item_biases_batch - pred_ratings
-        model.user_biases[user_idx] = np.sum(errors + model.user_biases[user_idx]) / (len(ratings) + lambd)
+        model.user_biases[user_idx] = np.sum(errors + model.user_biases[user_idx]) / (len(ratings) + tau)
         
         # Update User Latent Vector (U)
         # b = V^T * (ratings - mu - b_u - b_i)
@@ -537,3 +594,42 @@ def optimize_single_user(model, user_idx, rated_item_indices, ratings, num_iters
         
         # Solve Ax = b
         model.U[user_idx] = np.linalg.solve(A, b)
+
+def run_hyperparameter_search(fit_data):
+    # Search over K and tau; keeping gamma = 0.1 for stability
+    k_values = [2, 10, 20]
+    tau_values = [0.01, 0.1, 1.0]
+    fixed_gamma = 0.01
+    num_iters = 10 
+    
+    search_results = []
+    print(f"{'K':<5} | {'tau':<8} | {'Train RMSE':<12} | {'Test RMSE':<12} | {'Loss':<15}")
+    print("-" * 60)
+
+    for K in k_values:
+        for T in tau_values:
+            model = ALSRecommender(fit_data, K=K, tau=T, gamma=fixed_gamma, num_iters=num_iters)
+            model.train_test_split()
+            model.fit()
+            
+            final_train_rmse = model.rmse_hist[-1]
+            final_test_rmse = model.rmse_test_hist[-1]
+            
+            # Use the full loss function with both tau and gamma
+            final_loss = calc_total_loss_numba(
+                model.train_users, model.train_items, model.train_ratings,
+                model.mu, model.U, model.V, model.user_biases, model.item_biases, 
+                model.tau, model.gamma
+            )
+            
+            res = {
+                'K': K,
+                'tau': T,
+                'Train_RMSE': round(final_train_rmse, 4),
+                'Test_RMSE': round(final_test_rmse, 4),
+                'Total_Loss': round(final_loss, 2)
+            }
+            search_results.append(res)
+            print(f"{K:<5} | {T:<8} | {res['Train_RMSE']:<12} | {res['Test_RMSE']:<12} | {res['Total_Loss']:<15}")
+
+    return pd.DataFrame(search_results)
