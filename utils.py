@@ -6,6 +6,9 @@ import numpy as np
 import matplotlib.pyplot as plt
 import pandas as pd
 from numba import njit, prange
+import math
+
+
 
 class FitData:
     def __init__(self, ratings_csv, movies_csv=None):
@@ -98,6 +101,104 @@ class FitData:
 
 
 
+
+
+# ---------------------------
+# Create figures folder
+# ---------------------------
+FIG_DIR = "figures"
+os.makedirs(FIG_DIR, exist_ok=True)
+
+
+
+def plot_eda_summary_pdf(
+    scores,
+    user_rating_counts,
+    movie_rating_counts,
+    movie_counter,
+    movie_ids,
+    filename="eda_summary_2x2.pdf"
+):
+    """
+    Creates a single PDF with:
+    (1) User activity histogram
+    (2) Rating distribution
+    (3) Top-20 rated movies
+    (4) Power-law (degree distribution for both users and movies)
+    """
+
+    fig, axes = plt.subplots(2, 2, figsize=(14, 10))
+    ax1, ax2, ax3, ax4 = axes.flatten()
+
+    # --------------------------------------------------
+    # (1) User activity histogram (log-x)
+    # --------------------------------------------------
+    bins = np.logspace(
+        0,
+        math.ceil(math.log10(user_rating_counts.max() + 1)),
+        40
+    )
+    ax1.hist(user_rating_counts, bins=bins, edgecolor="black")
+    ax1.set_xscale("log")
+    ax1.set_xlabel("Ratings per user (log scale)")
+    ax1.set_ylabel("Number of users")
+    ax1.set_title("a.")
+
+    # --------------------------------------------------
+    # (2) Rating distribution
+    # --------------------------------------------------
+    rating_bins = np.arange(
+        np.floor(scores.min()) - 0.5,
+        np.ceil(scores.max()) + 0.5,
+        0.5
+    )
+    ax2.hist(scores, bins=rating_bins, edgecolor="black")
+    ax2.set_xlabel("Rating")
+    ax2.set_ylabel("Count")
+    ax2.set_title("b.")
+
+    # --------------------------------------------------
+    # (3) Top-20 rated movies
+    # --------------------------------------------------
+    top20 = movie_counter.most_common(20)
+    movie_labels = [f"M{movie_ids[i]}" for i, _ in top20]
+    movie_counts = [c for _, c in top20]
+    y_pos = np.arange(len(movie_labels))
+
+    ax3.barh(y_pos, movie_counts, edgecolor="black")
+    ax3.set_yticks(y_pos)
+    ax3.set_yticklabels(movie_labels)
+    ax3.invert_yaxis()
+    ax3.set_xlabel("Number of ratings")
+    ax3.set_title("c.")
+
+    # --------------------------------------------------
+    # (4) Power-law / degree distribution for both users & movies
+    # --------------------------------------------------
+    # Movies
+    movie_deg, movie_freq = np.unique(movie_rating_counts, return_counts=True)
+    ax4.scatter(movie_deg, movie_freq, s=12, color="green", label="Movies", alpha=0.8)
+    # Users
+    user_deg, user_freq = np.unique(user_rating_counts, return_counts=True)
+    ax4.scatter(user_deg, user_freq, s=12, color="blue", label="Users", alpha=0.8)
+
+
+    ax4.set_xscale("log")
+    ax4.set_yscale("log")
+    ax4.set_xlabel("Degree (number of ratings)")
+    ax4.set_ylabel("Frequency")
+    ax4.set_title("d.")
+    ax4.legend()
+
+    # --------------------------------------------------
+    # Layout & save
+    # --------------------------------------------------
+    plt.tight_layout()
+    out_path = os.path.join(FIG_DIR, filename)
+    fig.savefig(out_path, format="pdf", bbox_inches="tight")
+    plt.close(fig)
+
+    print(f"✓ Saved: {out_path}")
 
 
 # --------------------------
