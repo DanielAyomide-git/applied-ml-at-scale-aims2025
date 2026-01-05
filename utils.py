@@ -482,7 +482,7 @@ def plot_comparisons(model_dict, save_path="figures/als_training_comparison_32m.
     # -----------------------------------
     # Overall formatting
     # -----------------------------------
-    fig.suptitle("ALS Training vs Test RMSE (32M Dataset)", fontsize=14)
+    # fig.suptitle("ALS Training vs Test RMSE (32M Dataset)", fontsize=14)
 
     plt.tight_layout(rect=[0, 0.02, 1, 0.95])
 
