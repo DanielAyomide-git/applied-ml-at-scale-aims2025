@@ -195,37 +195,6 @@ def plot_eda_summary_pdf(
 # --------------------------
 # Numba-optimized update functions
 # --------------------------
-@njit(parallel=True)
-def update_user_biases_numba(
-    M,
-    mu,
-    gamma,
-    U,
-    V,
-    item_biases,
-    user_items_flat,
-    user_items_ptr,
-    user_items_len,
-    user_ratings_flat,
-    user_biases,
-):
-    for m in prange(M):
-        start = user_items_ptr[m]
-        ln = user_items_len[m]
-        num = 0.0
-        den = gamma
-        Um = U[m]
-        for k in range(ln):
-            idx = start + k
-            n = user_items_flat[idx]
-            r = user_ratings_flat[idx]
-            dot = 0.0
-            Vn = V[n]
-            for t in range(Vn.shape[0]):
-                dot += Um[t] * Vn[t]
-            num += r - mu - item_biases[n] - dot
-            den += 1.0
-        user_biases[m] = num / den if den > 0.0 else 0.0
 
 
 @njit(parallel=True)
@@ -260,52 +229,6 @@ def update_item_biases_numba(
             den += 1.0
         item_biases[n] = num / den if den > 0.0 else 0.0
 
-
-@njit(parallel=True)
-def update_user_latent_numba(
-    M,
-    K,
-    mu,
-    tau,
-    U,
-    V,
-    user_biases,
-    item_biases,
-    user_items_flat,
-    user_items_ptr,
-    user_items_len,
-    user_ratings_flat,
-):
-    # Precompute V.T @ V for the entire dataset once to speed up "all-item" calculations
-    # This is a trick used in "Implicit ALS" but can be adapted.
-
-    for m in prange(M):
-        start = user_items_ptr[m]
-        ln = user_items_len[m]
-        if ln == 0:
-            continue
-
-        # A = V_batch.T @ V_batch + tau * I
-        # b = V_batch.T @ (ratings - offset)
-        A = np.eye(K) * tau
-        b = np.zeros(K)
-        ub = user_biases[m]
-
-        for k in range(ln):
-            idx = start + k
-            n = user_items_flat[idx]
-            r = user_ratings_flat[idx]
-            Vn = V[n]
-            # Use dot product for b
-            error = r - mu - ub - item_biases[n]
-            for t in range(K):
-                b[t] += Vn[t] * error
-                # Rank-1 update of A
-                for p in range(K):
-                    A[t, p] += Vn[t] * Vn[p]
-
-        # Solving the small KxK system
-        U[m] = np.linalg.solve(A, b)
 
 
 @njit(parallel=True)
@@ -369,67 +292,97 @@ def calc_rmse_numba(u_indices, m_indices, ratings, mu, U, V, user_biases, item_b
 
 
 @njit(parallel=True)
-def calc_total_loss_numba(
-    u_indices, m_indices, ratings, mu, U, V, user_biases, item_biases, tau, gamma
-):
-    """
-    Calculates the Total Loss (Negative Log-Likelihood) based on Slide 158.
+def update_user_biases_numba(M, mu, lambd, gamma, U, V, item_biases,
+                             user_items_flat, user_items_ptr, user_items_len,
+                             user_ratings_flat, user_biases):
+    for m in prange(M):
+        start = user_items_ptr[m]
+        ln = user_items_len[m]
+        num = 0.0
+        # According to Slide 69: num = lambda * sum(r - predictions_without_bu)
+        for k in range(ln):
+            idx = start + k
+            n = user_items_flat[idx]
+            r = user_ratings_flat[idx]
+            
+            # Predict excluding current user bias
+            dot = 0.0
+            Um = U[m]
+            Vn = V[n]
+            for t in range(Vn.shape[0]):
+                dot += Um[t] * Vn[t]
+            
+            num += (r - mu - item_biases[n] - dot)
+        
+        # According to Slide 69: bu = (lambda * num) / (lambda * count + gamma)
+        denominator = (lambd * ln) + gamma
+        user_biases[m] = (lambd * num) / denominator if denominator > 0 else 0.0
 
-    Formula:
-    Loss = 0.5 * SSE + 0.5 * tau * (sum(U^2) + sum(V^2)) + 0.5 * gamma * (sum(bu^2) + sum(bi^2))
+@njit(parallel=True)
+def update_user_latent_numba(M, K, mu, lambd, tau, U, V, user_biases, item_biases,
+                            user_items_flat, user_items_ptr, user_items_len,
+                            user_ratings_flat):
+    for m in prange(M):
+        start = user_items_ptr[m]
+        ln = user_items_len[m]
+        if ln == 0: 
+            continue
+        
+        # According to Slide 71: A = (lambda * sum(V V.T)) + tau * I
+        A = np.eye(K) * tau
+        b = np.zeros(K)
+        ub = user_biases[m]
+        
+        for k in range(ln):
+            idx = start + k
+            n = user_items_flat[idx]
+            r = user_ratings_flat[idx]
+            Vn = V[n]
+            
+            # Residual excluding current latent interaction
+            error = r - mu - ub - item_biases[n]
+            
+            for t in range(K):
+                # b = lambda * sum(V * error)
+                b[t] += lambd * Vn[t] * error
+                for p in range(K):
+                    A[t, p] += lambd * Vn[t] * Vn[p]
+        
+        U[m] = np.linalg.solve(A, b)
+
+@njit(parallel=True)
+def calc_total_loss_numba(u_indices, m_indices, ratings, mu, U, V, user_biases, item_biases, lambd, tau, gamma):
     """
-    # 1. Calculate Sum of Squared Errors (SSE)
-    # This represents the Data Likelihood term
+    Negative Log-Likelihood matching Slide 69:
+    NLL = 0.5 * lambda * SSE + 0.5 * tau * sum(U^2 + V^2) + 0.5 * gamma * sum(biases^2)
+    """
     sse = 0.0
     for i in prange(len(ratings)):
         u = u_indices[i]
         m = m_indices[i]
         r = ratings[i]
-
-        # Compute dot product U_m . V_n
         dot = 0.0
         for k in range(U.shape[1]):
             dot += U[u, k] * V[m, k]
-
-        # Prediction: mu + b_u + b_i + (U . V)
         pred = mu + user_biases[u] + item_biases[m] + dot
         sse += (r - pred) ** 2
 
-    # 2. Calculate Latent Vector Regularization (tau)
-    reg_u = 0.0
-    for i in prange(U.shape[0]):
-        for k in range(U.shape[1]):
-            reg_u += U[i, k] ** 2
+    reg_vectors = 0.0
+    for i in prange(U.shape[0]): 
+        reg_vectors += np.sum(U[i]**2)
+    for j in prange(V.shape[0]): 
+        reg_vectors += np.sum(V[j]**2)
 
-    reg_v = 0.0
-    for j in prange(V.shape[0]):
-        for k in range(V.shape[1]):
-            reg_v += V[j, k] ** 2
+    reg_biases = np.sum(user_biases**2) + np.sum(item_biases**2)
 
-    # 3. Calculate Bias Regularization (gamma)
-    reg_bu = 0.0
-    for i in prange(user_biases.shape[0]):
-        reg_bu += user_biases[i] ** 2
-
-    reg_bi = 0.0
-    for j in prange(item_biases.shape[0]):
-        reg_bi += item_biases[j] ** 2
-
-    # Final Combination according to the probabilistic derivation
-    # total_loss = (Likelihood) + (Prior on Vectors) + (Prior on Biases)
-    total_loss = (
-        (0.5 * sse) + (0.5 * tau * (reg_u + reg_v)) + (0.5 * gamma * (reg_bu + reg_bi))
-    )
-
-    return total_loss
-
-
+    return (0.5 * lambd * sse) + (0.5 * tau * reg_vectors) + (0.5 * gamma * reg_biases)
 class ALSRecommender:
     def __init__(
-        self, fit_data, K=10, tau=1, gamma=1, num_iters=10, test_ratio=0.2
+        self, fit_data, K=10, lambd=1.0,  tau=1, gamma=1, num_iters=10, test_ratio=0.2
     ):
         self.df = fit_data
         self.K = K
+        self.lambd = lambd
         self.tau = tau
         self.gamma = gamma  # For biases
         self.num_iters = num_iters
@@ -512,6 +465,7 @@ class ALSRecommender:
             update_user_biases_numba(
                 self.M,
                 self.mu,
+                self.lambd,
                 self.gamma,
                 self.U,
                 self.V,
@@ -526,6 +480,7 @@ class ALSRecommender:
             update_item_biases_numba(
                 self.N,
                 self.mu,
+                self.lambd,
                 self.gamma,
                 self.U,
                 self.V,
@@ -541,6 +496,7 @@ class ALSRecommender:
                 self.M,
                 self.K,
                 self.mu,
+                self.lambd,
                 self.tau,
                 self.U,
                 self.V,
@@ -556,6 +512,7 @@ class ALSRecommender:
                 self.N,
                 self.K,
                 self.mu,
+                self.lambd,
                 self.tau,
                 self.U,
                 self.V,
