@@ -426,7 +426,7 @@ def calc_total_loss_numba(
 
 class ALSRecommender:
     def __init__(
-        self, fit_data, K=10, tau=0.1, gamma=0.01, num_iters=10, test_ratio=0.2
+        self, fit_data, K=10, tau=1, gamma=1, num_iters=10, test_ratio=0.2
     ):
         self.df = fit_data
         self.K = K
@@ -847,55 +847,38 @@ def optimize_single_user(model, user_idx, rated_item_indices, ratings, num_iters
         # Solve Ax = b
         model.U[user_idx] = np.linalg.solve(A, b)
 
-
 def run_hyperparameter_search(fit_data):
-    # Search over K and tau; keeping gamma = 0.1 for stability
+    """
+    Prints and stores all combinations of K, tau, and gamma.
+    """
     k_values = [2, 10, 20]
     tau_values = [0.01, 0.1, 1.0]
-    fixed_gamma = 0.01
-    num_iters = 10
-
+    gamma_values = [0.01, 0.1, 1.0]
+    num_iters = 30
+    
     search_results = []
-    print(
-        f"{'K':<5} | {'tau':<8} | {'Train RMSE':<12} | {'Test RMSE':<12} | {'Loss':<15}"
-    )
-    print("-" * 60)
+    print(f"{'K':<4} | {'tau':<5} | {'gamma':<5} | {'Train RMSE':<10} | {'Test RMSE':<10} | {'Total Loss (NLL)':<15}")
+    print("-" * 75)
 
     for K in k_values:
         for T in tau_values:
-            model = ALSRecommender(
-                fit_data, K=K, tau=T, gamma=fixed_gamma, num_iters=num_iters
-            )
-            model.train_test_split()
-            model.fit()
-
-            final_train_rmse = model.rmse_hist[-1]
-            final_test_rmse = model.rmse_test_hist[-1]
-
-            # Use the full loss function with both tau and gamma
-            final_loss = calc_total_loss_numba(
-                model.train_users,
-                model.train_items,
-                model.train_ratings,
-                model.mu,
-                model.U,
-                model.V,
-                model.user_biases,
-                model.item_biases,
-                model.tau,
-                model.gamma,
-            )
-
-            res = {
-                "K": K,
-                "tau": T,
-                "Train_RMSE": round(final_train_rmse, 4),
-                "Test_RMSE": round(final_test_rmse, 4),
-                "Total_Loss": round(final_loss, 2),
-            }
-            search_results.append(res)
-            print(
-                f"{K:<5} | {T:<8} | {res['Train_RMSE']:<12} | {res['Test_RMSE']:<12} | {res['Total_Loss']:<15}"
-            )
+            for G in gamma_values:
+                model = ALSRecommender(fit_data, K=K, tau=T, gamma=G, num_iters=num_iters)
+                model.train_test_split()
+                model.fit()
+                
+                final_loss = model.loss_hist[-1]
+                
+                res = {
+                    'K': K, 'tau': T, 'gamma': G,
+                    'Train_RMSE': round(model.rmse_hist[-1], 4),
+                    'Test_RMSE': round(model.rmse_test_hist[-1], 4),
+                    'Total_Loss': round(final_loss, 2)
+                }
+                search_results.append(res)
+                print(f"{K:<4} | {T:<5} | {G:<5} | {res['Train_RMSE']:<10} | {res['Test_RMSE']:<10} | {res['Total_Loss']:<15,}")
 
     return pd.DataFrame(search_results)
+
+# Execute
+# results_table = run_full_grid_search(fit_data)
