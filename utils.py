@@ -201,6 +201,7 @@ def plot_eda_summary_pdf(
 def update_item_biases_numba(
     N,
     mu,
+    lambd,
     gamma,
     U,
     V,
@@ -215,8 +216,9 @@ def update_item_biases_numba(
         start = movie_users_ptr[n]
         ln = movie_users_len[n]
         num = 0.0
-        den = gamma
+        den = lambd * ln + gamma
         Vn = V[n]
+
         for k in range(ln):
             idx = start + k
             m = movie_users_flat[idx]
@@ -226,8 +228,8 @@ def update_item_biases_numba(
             for t in range(Vn.shape[0]):
                 dot += Um[t] * Vn[t]
             num += r - mu - user_biases[m] - dot
-            den += 1.0
-        item_biases[n] = num / den if den > 0.0 else 0.0
+
+        item_biases[n] = (lambd * num) / den if den > 0.0 else 0.0
 
 
 
@@ -236,6 +238,7 @@ def update_item_latent_numba(
     N,
     K,
     mu,
+    lambd,
     tau,
     U,
     V,
@@ -246,14 +249,13 @@ def update_item_latent_numba(
     movie_users_len,
     movie_ratings_flat,
 ):
-    eyes = np.eye(K) * tau
     for n in prange(N):
         start = movie_users_ptr[n]
         ln = movie_users_len[n]
         if ln == 0:
             continue
 
-        A = eyes.copy()
+        A = np.eye(K) * tau
         b = np.zeros(K)
         ib = item_biases[n]
 
@@ -264,10 +266,12 @@ def update_item_latent_numba(
             Um = U[m]
             ub = user_biases[m]
             error = r - mu - ub - ib
-            b += Um * error
-            for i in range(K):
-                for j in range(K):
-                    A[i, j] += Um[i] * Um[j]
+
+            for t in range(K):
+                b[t] += lambd * Um[t] * error
+                for p in range(K):
+                    A[t, p] += lambd * Um[t] * Um[p]
+
         V[n] = np.linalg.solve(A, b)
 
 
@@ -401,6 +405,8 @@ class ALSRecommender:
         self.rmse_hist = []
         self.rmse_test_hist = []
         self.loss_hist = []
+        self.loss_test_hist = []
+
 
     def train_test_split(self):
         print("[LOG] Flattening FitData structure for Numba...")
@@ -533,10 +539,29 @@ class ALSRecommender:
                 self.V,
                 self.user_biases,
                 self.item_biases,
+                self.lambd,
                 self.tau,
                 self.gamma,
             )
+
             self.loss_hist.append(loss)
+
+            test_loss = calc_total_loss_numba(
+                self.test_users,
+                self.test_items,
+                self.test_ratings,
+                self.mu,
+                self.U,
+                self.V,
+                self.user_biases,
+                self.item_biases,
+                self.lambd,
+                self.tau,
+                self.gamma,
+            )
+
+            self.loss_test_hist.append(test_loss)
+
 
             # Metrics
             sample_size = min(100000, len(self.train_users))
@@ -627,70 +652,88 @@ def run_multi_k_training(fit_data, k_values=[2, 10, 20], num_iters=20):
     return results
 
 
-def plot_comparisons(model_dict, save_path="figures/als_training_comparison_32m.pdf"):
+def plot_comparisons(model_dict, save_path="figures/als_training_comparison_3row.pdf"):
     """
-    Plots:
-    (a) Training RMSE
-    (b) Test RMSE
-    (c) Negative Log-Likelihood (Total Loss)
-    All in one row (3 per row) and saved as a single PDF.
+    Plots (1 row, 3 columns):
+    (a) Train & Test RMSE on same chart
+    (b) Training Loss (NLL)
+    (c) Test Loss (NLL)
     """
 
-    fig, axes = plt.subplots(1, 3, figsize=(18, 5), sharex=True)
+    fig, axes = plt.subplots(1, 3, figsize=(20, 5), sharex=True)
 
     # -----------------------------------
-    # (a) TRAIN RMSE
+    # (a) TRAIN + TEST RMSE
     # -----------------------------------
     for K, model in model_dict.items():
         axes[0].plot(
-            model.rmse_hist, marker="o", linestyle="--", alpha=0.8, label=f"K={K}"
+            model.rmse_hist,
+            marker="o",
+            linestyle="--",
+            alpha=0.9,
+            label=f"Train K={K}",
+        )
+        axes[0].plot(
+            model.rmse_test_hist,
+            marker="s",
+            linestyle="-",
+            alpha=0.9,
+            label=f"Test K={K}",
         )
 
-    axes[0].set_title("a. Training RMSE")
+    axes[0].set_title("a. Training vs Test RMSE")
     axes[0].set_xlabel("Iteration")
     axes[0].set_ylabel("RMSE")
     axes[0].grid(True)
-    axes[0].legend()
+    axes[0].legend(fontsize=9)
 
     # -----------------------------------
-    # (b) TEST RMSE
-    # -----------------------------------
-    for K, model in model_dict.items():
-        axes[1].plot(
-            model.rmse_test_hist, marker="o", linestyle="-", alpha=0.9, label=f"K={K}"
-        )
-
-    axes[1].set_title("b. Test RMSE")
-    axes[1].set_xlabel("Iteration")
-    axes[1].grid(True)
-    axes[1].legend()
-
-    # -----------------------------------
-    # (c) LOG-LIKELIHOOD (NEGATIVE TOTAL LOSS)
+    # (b) TRAINING LOSS (NLL)
     # -----------------------------------
     for K, model in model_dict.items():
         if not hasattr(model, "loss_hist"):
-            continue  # safety check
-
-        axes[2].plot(
-            model.loss_hist, marker="s", linestyle="-", alpha=0.85, label=f"K={K}"
+            continue
+        axes[1].plot(
+            model.loss_hist,
+            marker="o",
+            linestyle="-",
+            alpha=0.9,
+            label=f"K={K}",
         )
 
-    axes[2].set_title("c. Negative Log-Likelihood")
-    axes[2].set_xlabel("Iteration")
-    axes[2].set_ylabel("Total Loss")
-    axes[2].grid(True)
-    axes[2].legend()
+    axes[1].set_title("b. Training Negative Log-Likelihood")
+    axes[1].set_xlabel("Iteration")
+    axes[1].set_ylabel("Loss")
+    axes[1].grid(True)
+    axes[1].legend(fontsize=9)
 
     # -----------------------------------
-    # Layout & Save
+    # (c) TEST LOSS (NLL)
+    # -----------------------------------
+    for K, model in model_dict.items():
+        if not hasattr(model, "loss_test_hist"):
+            continue
+        axes[2].plot(
+            model.loss_test_hist,
+            marker="s",
+            linestyle="-",
+            alpha=0.9,
+            label=f"K={K}",
+        )
+
+    axes[2].set_title("c. Test Negative Log-Likelihood")
+    axes[2].set_xlabel("Iteration")
+    axes[2].set_ylabel("Loss")
+    axes[2].grid(True)
+    axes[2].legend(fontsize=9)
+
+    # -----------------------------------
+    # SAVE
     # -----------------------------------
     plt.tight_layout()
     plt.savefig(save_path, format="pdf", bbox_inches="tight")
     print(f"[LOG] Plot saved to {save_path}")
-
     plt.close(fig)
-
 
 def load_and_test_pickle(filename, fit_data_obj):
     if not os.path.exists(filename):
