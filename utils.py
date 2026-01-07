@@ -652,10 +652,10 @@ def run_multi_k_training(fit_data, k_values=[2, 10, 20], num_iters=20):
     return results
 
 
-def plot_comparisons(model_dict, save_path="figures/als_training_comparison_3row.pdf"):
+def plot_comparisons(model_dict, save_path="figures/als_training_comparison_32m.pdf"):
     """
     Plots (1 row, 3 columns):
-    (a) Train & Test RMSE on same chart
+    (a) Train & Test RMSE on same chart (same color per K)
     (b) Training Loss (NLL)
     (c) Test Loss (NLL)
     """
@@ -663,21 +663,26 @@ def plot_comparisons(model_dict, save_path="figures/als_training_comparison_3row
     fig, axes = plt.subplots(1, 3, figsize=(20, 5), sharex=True)
 
     # -----------------------------------
-    # (a) TRAIN + TEST RMSE
+    # (a) TRAIN + TEST RMSE (same color per K)
     # -----------------------------------
     for K, model in model_dict.items():
-        axes[0].plot(
+        # Plot train first and grab its color
+        line_train, = axes[0].plot(
             model.rmse_hist,
             marker="o",
             linestyle="--",
             alpha=0.9,
             label=f"Train K={K}",
         )
+        color = line_train.get_color()
+
+        # Plot test with same color
         axes[0].plot(
             model.rmse_test_hist,
             marker="s",
             linestyle="-",
             alpha=0.9,
+            color=color,
             label=f"Test K={K}",
         )
 
