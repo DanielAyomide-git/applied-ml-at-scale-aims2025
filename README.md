@@ -22,9 +22,6 @@ The system is built to scale from raw matrix factorization to a user-facing clou
 ## 📊 Exploratory Data Analysis (EDA)
 We analyzed 32 million interactions to understand the statistical behavior of users and items. The dataset exhibits a classic heavy-tailed distribution, necessitating robust regularization.
 
-![EDA Overview](figures/eda_overview.pdf)
-*Figure 2: (a) Ratings per user. (b) Global rating distribution. (c) Top movies. (d) Log-log degree distribution confirming Power Law behavior.*
-
 **Key Insights:**
 * **Systematic Positivity Bias:** Mean rating is 3.54; users are more likely to rate movies they enjoy.
 * **Scale-Free Network:** The linear descent in the log-log plot (d) validates that the vast majority of items have very few ratings, highlighting the "Long Tail" challenge.
@@ -35,19 +32,12 @@ We analyzed 32 million interactions to understand the statistical behavior of us
 We evaluated the model across different latent dimensions ($K$). While higher $K$ reduces training loss, it introduces a risk of overfitting.
 
 ### 📉 Training Convergence
-![ALS Training Comparison](figures/als_training_comparison_32m.pdf)
-*Figure 3: Monotonic decrease in Negative Log-Likelihood and RMSE trajectory.*
-
 * **$K=2$:** Suffers from high bias (underfitting).
 * **$K=10$:** Optimal balance for generalization and semantic recovery.
 * **$K=20$:** Achieves lowest training error but shows test RMSE divergence (overfitting).
 
 ### 🌌 Latent Space Geometry
 The model successfully recovers the latent taxonomy of the film industry purely from user interaction data.
-
-![Genre Embeddings](figures/genre_latent_embeddings_all_row.pdf)
-*Figure 4: Genre centroids. Animation and Children cluster together, positioned far from Horror.*
-
 ---
 
 ## 🛠️ Tech Stack & Implementation
