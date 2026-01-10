@@ -1,9 +1,10 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse
 import os, requests
 from .recommender import recommend_for_user_profile, get_top_popular_movies
 from fastapi.staticfiles import StaticFiles
 from dotenv import load_dotenv
+from fastapi.templating import Jinja2Templates # Add this
 
 load_dotenv()
 
@@ -13,12 +14,17 @@ OMDB_KEY = os.getenv("OMDB_KEY")
 TMDB_KEY = os.getenv("TMDB_KEY")
 
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
+templates = Jinja2Templates(directory="app/templates") # Point to your templates folder
+
 
 @app.get("/", response_class=HTMLResponse)
-def home():
-    template_path = os.path.join(os.path.dirname(__file__), "templates/index.html")
-    with open(template_path, "r", encoding="utf-8") as f:
-        return f.read()
+def home(request: Request):
+    # Instead of f.read(), we use templates.TemplateResponse
+    # This allows us to pass "OMDB_KEY" into the HTML
+    return templates.TemplateResponse("index.html", {
+        "request": request, 
+        "api_key": OMDB_KEY
+    })
 
 @app.get("/api/search")
 def search_movies(q: str):

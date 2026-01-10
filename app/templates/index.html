@@ -58,7 +58,7 @@
     <h2 class="text-xl md:text-2xl font-semibold mb-6 text-red-500 border-l-4 border-red-500 pl-4">Search Results</h2>
     <div id="searchResults" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4 md:gap-6"></div>
   </div>
-  <!-- ADS SECTION -->
+
   <div class="mb-12 relative group/ads">
     <div class="flex items-center justify-between mb-4">
         <div class="flex items-center gap-2">
@@ -90,17 +90,16 @@
   <div class="bg-gray-900 rounded-2xl overflow-hidden w-full max-w-4xl relative border border-gray-800 max-h-[95vh] overflow-y-auto">
     <button onclick="closeModal()" class="absolute top-2 right-4 text-white text-4xl z-10 hover:text-red-500">&times;</button>
     <div class="flex flex-col">
+      <!-- Trailer Container -->
       <div id="trailerContainer" class="hidden aspect-video bg-black">
-        <iframe id="trailer" class="w-full h-full" frameborder="0" allowfullscreen></iframe>
+        <iframe id="trailer" class="w-full h-full" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>
       </div>
       <div class="p-5 md:p-8">
         <h2 id="modalTitle" class="text-2xl md:text-3xl font-bold mb-1"></h2>
-        <!-- GENRE ADDED HERE -->
         <p id="modalGenre" class="text-red-500 font-bold text-xs uppercase mb-4 tracking-widest"></p>
-        
         <p id="modalPlot" class="text-sm md:text-base text-gray-400 mb-6 leading-relaxed"></p>
         
-        <!-- WRAPPED RATING SECTION TO HIDE IT -->
+        <!-- Rating Section -->
         <div id="ratingSection" class="flex flex-col sm:flex-row items-start sm:items-center gap-4 border-t border-gray-800 pt-6">
           <span class="font-bold text-red-500 text-sm md:text-base uppercase tracking-widest">Rate this Movie:</span>
           <div id="stars" class="flex text-3xl md:text-4xl gap-2" onmouseleave="resetStars()"></div>
@@ -111,9 +110,11 @@
 </div>
 
 <script>
+// IMPORTANT: Ensure your FastAPI uses templates.TemplateResponse to inject this
+const OMDB_API_KEY = "{{ api_key }}"; 
+
 const RATINGS_KEY = "movie_app_ratings";
 const RECS_KEY = "movie_app_ai_recs"; 
-const OMDB_API_KEY = "f8915c00"; 
 let currentMovieID = null;
 let isPaused = false;
 
@@ -175,7 +176,6 @@ async function fetchLatestReleases() {
                         <p class="text-[10px] text-gray-400 leading-tight">Featured Release • ${movie.Year}</p>
                     </div>
                 `;
-                // MODIFIED: Pass 'true' to hide ratings for ads
                 ad.onclick = () => openMovie(movie.imdbID, true);
                 adsContainer.appendChild(ad);
             });
@@ -202,27 +202,26 @@ searchBox.oninput = async () => {
     document.getElementById("searchResults").innerHTML = "<p class='col-span-full text-center py-10'>Searching...</p>";
     const res = await fetch(`/api/search?q=${q}`);
     const data = await res.json();
-    renderCards(data.Search || [], document.getElementById("searchResults"));
+    renderCards(data.Search || [], document.getElementById("searchResults"), false);
 };
 
-function renderCards(list, container) {
+function renderCards(list, container, hideRating = false) {
     container.innerHTML = "";
     list.forEach(m => {
         if (!m.Poster || m.Poster === "N/A") return;
+        const imdbID = m.imdbID || m.imdb_id;
         const card = document.createElement("div");
         card.className = "bg-gray-900 rounded-xl overflow-hidden cursor-pointer hover:ring-2 hover:ring-red-600 transition transform hover:-translate-y-2 flex flex-col h-full shadow-lg";
         card.innerHTML = `
             <img src="${m.Poster}" class="w-full aspect-[2/3] object-cover" onerror="this.closest('.bg-gray-900').remove()"/>
             <div class="p-3 mt-auto"><p class="font-bold truncate text-xs md:text-sm text-white">${m.Title}</p><p class="text-[10px] md:text-xs text-gray-500">${m.Year}</p></div>
         `;
-        // MODIFIED: Pass 'false' to show ratings for standard cards
-        card.onclick = () => openMovie(m.imdbID || m.imdb_id, false);
+        card.onclick = () => openMovie(imdbID, hideRating);
         container.appendChild(card);
     });
 }
 
-// MODIFIED: Accepts isAd parameter
-async function openMovie(imdbID, isAd = false) {
+async function openMovie(imdbID, hideRating = false) {
     currentMovieID = imdbID;
     toggleLoading(true, "Fetching details...");
     try {
@@ -230,9 +229,10 @@ async function openMovie(imdbID, isAd = false) {
         const data = await res.json();
         
         document.getElementById("modalTitle").innerText = data.movie.Title;
-        document.getElementById("modalGenre").innerText = data.movie.Genre; // SET GENRE
+        document.getElementById("modalGenre").innerText = data.movie.Genre;
         document.getElementById("modalPlot").innerText = data.movie.Plot;
         
+        // FIX: Construct YouTube embed URL
         const trailer = document.getElementById("trailer");
         if (data.trailer) {
             trailer.src = `https://www.youtube.com/embed/${data.trailer}`;
@@ -242,9 +242,8 @@ async function openMovie(imdbID, isAd = false) {
             document.getElementById("trailerContainer").classList.add("hidden");
         }
 
-        // TOGGLE RATING SECTION
         const ratingSection = document.getElementById("ratingSection");
-        if (isAd) {
+        if (hideRating) {
             ratingSection.classList.add("hidden");
         } else {
             ratingSection.classList.remove("hidden");
@@ -294,7 +293,7 @@ async function saveRating(id, rating) {
             const combined = [...data.recommendations, ...existing];
             const unique = Array.from(new Map(combined.map(m => [m.imdbID, m])).values()).slice(0, 30);
             localStorage.setItem(RECS_KEY, JSON.stringify(unique));
-            renderCards(unique, document.getElementById("recMovies"));
+            renderCards(unique, document.getElementById("recMovies"), false);
             document.getElementById("recContainer").classList.remove("hidden");
             showToast();
         }
@@ -314,7 +313,13 @@ window.onload = async () => {
         fetchLatestReleases();
         const popRes = await fetch('/api/popular');
         const popData = await popRes.json();
-        renderCards(popData.movies, document.getElementById("popularMovies"));
+        renderCards(popData.movies, document.getElementById("popularMovies"), true);
+        
+        const savedRecs = getStoredRecs();
+        if(savedRecs.length > 0) {
+            renderCards(savedRecs, document.getElementById("recMovies"), false);
+            document.getElementById("recContainer").classList.remove("hidden");
+        }
     } finally { toggleLoading(false); }
 };
 </script>
