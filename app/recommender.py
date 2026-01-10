@@ -5,7 +5,7 @@ from pathlib import Path
 # -----------------------------
 # LOAD MODEL
 # -----------------------------
-MODEL_PATH = Path("models/als_model_k10.pkl")
+MODEL_PATH = Path("./app/models/als_model_k10.pkl")
 
 with open(MODEL_PATH, "rb") as f:
     model = pickle.load(f)
