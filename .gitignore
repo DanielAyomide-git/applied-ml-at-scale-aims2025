@@ -8,3 +8,4 @@ data
 /ml-latest-small
 models/*.pkl
 models/*.pkl
+.env

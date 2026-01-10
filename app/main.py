@@ -3,10 +3,14 @@ from fastapi.responses import HTMLResponse
 import os, requests
 from .recommender import recommend_for_user_profile, get_top_popular_movies
 from fastapi.staticfiles import StaticFiles
+from dotenv import load_dotenv
+
+load_dotenv()
 
 app = FastAPI()
-OMDB_KEY = "f8915c00"
-TMDB_KEY = "53c08e9901c3de6d832e13d1b844a49f"
+# Get keys from environment
+OMDB_KEY = os.getenv("OMDB_KEY")
+TMDB_KEY = os.getenv("TMDB_KEY")
 
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
 
