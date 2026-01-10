@@ -10,9 +10,10 @@ import math
 
 
 class FitData:
-    def __init__(self, ratings_csv, movies_csv=None):
+    def __init__(self, ratings_csv, movies_csv=None, links_csv=None):
         self.ratings_csv = ratings_csv
         self.movies_csv = movies_csv
+        self.links_csv = links_csv
 
         # Mappings
         self.user_id_to_idx = {}
@@ -20,6 +21,7 @@ class FitData:
         self.movie_id_to_idx = {}
         self.idx_to_movie_id = []
         self.movie_id_to_genres = {}
+        self.movie_id_to_imdb = {}
 
         self.movie_id_to_title = {}  # store movie titles
 
@@ -77,6 +79,16 @@ class FitData:
                     genres = row[2].split("|") if row[2] != "(no genres listed)" else []
                     self.movie_id_to_title[movie_id] = title
                     self.movie_id_to_genres[movie_id] = genres
+        if self.links_csv:
+            with open(self.links_csv, "r", encoding="utf-8") as f:
+                reader = csv.reader(f)
+                next(reader)
+                for row in reader:
+                    movie_id = int(row[0])
+                    imdb_id = row[1]
+                    if imdb_id:
+                        self.movie_id_to_imdb[movie_id] = f"tt{imdb_id.zfill(7)}"
+
 
     def get_user_ratings(self, user_id):
         u_idx = self.user_id_to_idx[user_id]
@@ -394,6 +406,7 @@ class ALSRecommender:
 
         self.M = self.df.num_users()
         self.N = self.df.num_movies()
+        
 
         # Init Latent Factors
         self.U = np.random.randn(self.M, K) * 0.1
@@ -406,6 +419,14 @@ class ALSRecommender:
         self.rmse_test_hist = []
         self.loss_hist = []
         self.loss_test_hist = []
+        self.idx_to_movie_id = fit_data.idx_to_movie_id
+
+        # NEW: index → imdb_id (aligned with V)
+        self.idx_to_imdb_id = [
+            fit_data.movie_id_to_imdb.get(mid, None)
+            for mid in self.idx_to_movie_id
+]
+
 
 
     def train_test_split(self):
@@ -594,7 +615,6 @@ class ALSRecommender:
             )
 
     def save_model(self, filename):
-        # Temporarily remove heavy training data to save disk space
         temp_data = (
             self.train_users,
             self.train_items,
@@ -607,17 +627,20 @@ class ALSRecommender:
             self.movie_users_flat,
             self.movie_ratings_flat,
         )
+
+        # Remove heavy arrays only
         self.train_users = self.train_items = self.train_ratings = None
         self.test_users = self.test_items = self.test_ratings = None
         self.user_items_flat = self.user_ratings_flat = None
         self.movie_users_flat = self.movie_ratings_flat = None
-        self.df = None  # Don't pickle the CSV loader data
+
+        self.df = None  # OK to drop FitData
 
         with open(filename, "wb") as f:
             pickle.dump(self, f)
+
         print(f"[LOG] Model saved to {filename}")
 
-        # Restore data to continue execution if needed
         (
             self.train_users,
             self.train_items,

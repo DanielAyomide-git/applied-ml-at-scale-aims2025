@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AI Movie Recommender</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    #toast { transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275); }
+    .star-filled { color: #eab308; }
+    .star-empty { color: #374151; }
+    .loader {
+        border: 4px solid #f3f3f3;
+        border-top: 4px solid #dc2626;
+        border-radius: 50%;
+        width: 40px;
+        height: 40px;
+        animation: spin 1s linear infinite;
+    }
+    @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+  </style>
+</head>
+<body class="bg-black text-gray-200">
+
+<!-- RELOAD LOGIC: Clear storage on forced refresh -->
+<script>
+    if (performance.getEntriesByType("navigation")[0].type === "reload") {
+        localStorage.clear();
+    }
+</script>
+
+<div id="loadingOverlay" class="fixed inset-0 bg-black bg-opacity-80 z-[100] hidden flex flex-col items-center justify-center">
+    <div class="loader mb-4"></div>
+    <p class="text-white font-bold">AI is thinking...</p>
+</div>
+
+<div id="toast" class="fixed top-10 left-1/2 -translate-x-1/2 bg-green-600 text-white px-8 py-4 rounded-full shadow-2xl opacity-0 pointer-events-none z-[110] transform -translate-y-10">
+    ✨ Movie List Updated!
+</div>
+
+<div class="max-w-7xl mx-auto p-6">
+  <header class="flex flex-col md:flex-row justify-between items-center mb-12 gap-6">
+    <img src="../static/logo.png" alt="AI RECS" class="h-20 w-auto cursor-pointer object-contain" onclick="location.reload()" 
+         onerror="this.outerHTML='<h1 class=\'text-4xl font-bold text-red-600 cursor-pointer\' onclick=\'location.reload()\'>🎬 AI RECS</h1>'">
+    
+    <div class="relative w-full md:w-1/2 lg:w-1/3">
+      <input id="searchBox" placeholder="Search movies to rate..." 
+        class="w-full p-4 pr-12 rounded-full bg-gray-900 border border-gray-700 text-white focus:outline-none focus:border-red-500 shadow-inner"/>
+      <button id="clearSearch" class="absolute right-5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-white hidden text-2xl font-bold">&times;</button>
+    </div>
+  </header>
+
+  <div id="searchContainer" class="hidden mb-12">
+    <h2 class="text-2xl font-semibold mb-6 text-red-500">Search Results</h2>
+    <div id="searchResults" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-6"></div>
+  </div>
+
+  <div id="recContainer" class="hidden mb-12">
+    <h2 class="text-2xl font-bold mb-6 flex items-center gap-2 text-white">
+        <span class="bg-red-600 text-xs px-2 py-1 rounded">AI</span> Recommended for You
+    </h2>
+    <div id="recMovies" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-6"></div>
+  </div>
+
+  <div id="popularContainer">
+      <h2 class="text-2xl font-semibold mb-6 text-gray-400">Most Rated Movies</h2>
+      <div id="popularMovies" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-6"></div>
+  </div>
+</div>
+
+<!-- MODAL -->
+<div id="modal" class="fixed inset-0 bg-black bg-opacity-95 hidden items-center justify-center z-50 p-4">
+  <div class="bg-gray-900 rounded-2xl overflow-hidden w-full max-w-4xl relative border border-gray-800 max-h-[90vh] overflow-y-auto">
+    <button onclick="closeModal()" class="absolute top-4 right-4 text-white text-4xl z-10 hover:text-red-500">&times;</button>
+    <div class="flex flex-col">
+      <div id="trailerContainer" class="hidden aspect-video bg-black">
+        <iframe id="trailer" class="w-full h-full" frameborder="0" allowfullscreen></iframe>
+      </div>
+      <div class="p-8">
+        <h2 id="modalTitle" class="text-3xl font-bold mb-2"></h2>
+        <p id="modalPlot" class="text-gray-400 mb-6"></p>
+        <div class="flex flex-col sm:flex-row items-center gap-6">
+          <span class="font-bold text-red-500">YOUR RATING:</span>
+          <div id="stars" class="flex text-4xl gap-2" onmouseleave="resetStars()"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+const RATINGS_KEY = "movie_app_ratings";
+const RECS_KEY = "movie_app_ai_recs"; 
+let currentMovieID = null;
+
+const getRatings = () => JSON.parse(localStorage.getItem(RATINGS_KEY) || "{}");
+const getStoredRecs = () => JSON.parse(localStorage.getItem(RECS_KEY) || "[]");
+
+function toggleLoading(show) {
+    document.getElementById("loadingOverlay").classList.toggle("hidden", !show);
+}
+
+function showToast() {
+    const t = document.getElementById("toast");
+    t.classList.replace("opacity-0", "opacity-100");
+    t.classList.replace("-translate-y-10", "translate-y-0");
+    setTimeout(() => {
+        t.classList.replace("opacity-100", "opacity-0");
+        t.classList.replace("translate-y-0", "-translate-y-10");
+    }, 3000);
+}
+
+const searchBox = document.getElementById("searchBox");
+const clearBtn = document.getElementById("clearSearch");
+
+clearBtn.onclick = () => {
+    searchBox.value = "";
+    clearBtn.classList.add("hidden");
+    document.getElementById("searchContainer").classList.add("hidden");
+    document.getElementById("popularContainer").classList.remove("hidden");
+    if (getStoredRecs().length > 0) document.getElementById("recContainer").classList.remove("hidden");
+};
+
+searchBox.oninput = async () => {
+    const q = searchBox.value;
+    clearBtn.classList.toggle("hidden", q.length === 0);
+    if (q.length < 3) return;
+
+    document.getElementById("popularContainer").classList.add("hidden");
+    document.getElementById("recContainer").classList.add("hidden");
+    document.getElementById("searchContainer").classList.remove("hidden");
+    document.getElementById("searchResults").innerHTML = "<p class='col-span-full text-center'>Searching...</p>";
+    
+    const res = await fetch(`/api/search?q=${q}`);
+    const data = await res.json();
+    renderCards(data.Search || [], document.getElementById("searchResults"));
+};
+
+function renderCards(list, container) {
+    container.innerHTML = "";
+    list.forEach(m => {
+        if (!m.Poster || m.Poster === "N/A") return;
+        const card = document.createElement("div");
+        card.className = "bg-gray-900 rounded-xl overflow-hidden cursor-pointer hover:ring-2 hover:ring-red-600 transition transform hover:-translate-y-2 flex flex-col h-full";
+        card.innerHTML = `
+            <img src="${m.Poster}" class="w-full aspect-[2/3] object-cover" onerror="this.closest('.bg-gray-900').remove()"/>
+            <div class="p-3 mt-auto"><p class="font-bold truncate text-sm text-white">${m.Title}</p><p class="text-xs text-gray-500">${m.Year}</p></div>
+        `;
+        card.onclick = () => openMovie(m.imdbID || m.imdb_id);
+        container.appendChild(card);
+    });
+}
+
+async function openMovie(imdbID) {
+    currentMovieID = imdbID;
+    toggleLoading(true);
+    try {
+        const res = await fetch(`/api/movie?imdb_id=${imdbID}`);
+        const data = await res.json();
+        document.getElementById("modalTitle").innerText = data.movie.Title;
+        document.getElementById("modalPlot").innerText = data.movie.Plot;
+        
+        const trailer = document.getElementById("trailer");
+        if (data.trailer) {
+            trailer.src = `https://www.youtube.com/embed/${data.trailer}?autoplay=0`;
+            document.getElementById("trailerContainer").classList.remove("hidden");
+        } else {
+            document.getElementById("trailerContainer").classList.add("hidden");
+        }
+
+        resetStars();
+        document.getElementById("modal").classList.replace("hidden", "flex");
+    } finally {
+        toggleLoading(false);
+    }
+}
+
+function highlightStars(count) {
+    const starsDiv = document.getElementById("stars");
+    starsDiv.innerHTML = "";
+    for (let i = 1; i <= 5; i++) {
+        const s = document.createElement("span");
+        s.innerHTML = "★";
+        s.className = `cursor-pointer transition ${i <= count ? 'star-filled' : 'star-empty'}`;
+        s.onmouseover = () => highlightStars(i);
+        s.onclick = () => saveRating(currentMovieID, i);
+        starsDiv.appendChild(s);
+    }
+}
+
+function resetStars() {
+    const rating = getRatings()[currentMovieID] || 0;
+    highlightStars(rating);
+}
+
+async function saveRating(id, rating) {
+    const r = getRatings();
+    r[id] = rating;
+    localStorage.setItem(RATINGS_KEY, JSON.stringify(r));
+    highlightStars(rating);
+
+    const res = await fetch("/api/recommend", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ratings: r })
+    });
+    const data = await res.json();
+    
+    if (data.recommendations.length > 0) {
+        const existing = getStoredRecs();
+        const combined = [...data.recommendations, ...existing];
+        const unique = Array.from(new Map(combined.map(m => [m.imdbID, m])).values()).slice(0, 30);
+        localStorage.setItem(RECS_KEY, JSON.stringify(unique));
+        renderCards(unique, document.getElementById("recMovies"));
+        document.getElementById("recContainer").classList.remove("hidden");
+        showToast();
+    }
+}
+
+function closeModal() {
+    document.getElementById("modal").classList.replace("flex", "hidden");
+    document.getElementById("trailer").src = "";
+}
+
+window.onload = async () => {
+    toggleLoading(true);
+    const popRes = await fetch('/api/popular');
+    const popData = await popRes.json();
+    renderCards(popData.movies, document.getElementById("popularMovies"));
+    toggleLoading(false);
+};
+</script>
+</body>
+</html>
