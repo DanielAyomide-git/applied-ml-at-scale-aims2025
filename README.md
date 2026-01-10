@@ -76,18 +76,6 @@ The model successfully recovers the latent taxonomy of the film industry purely 
 
 ---
 
-## 📖 Citation
-If you use this work in your research, please cite:
-
-```latex
-@article{olanrewaju2025architecting,
-  title={Architecting a Scalable Recommender System: From Alternating Least Squares to Production-Ready API},
-  author={Olanrewaju, Daniel Ayomide},
-  journal={AIMS South Africa Technical Report},
-  year={2025}
-}
-```
-
 ## 👤 Author
 **Daniel Ayomide Olanrewaju**  
 African Institute for Mathematical Sciences (AIMS) South Africa  
