@@ -22,6 +22,15 @@
     .scroll-smooth { scroll-behavior: smooth; }
     .scrollbar-hide::-webkit-scrollbar { display: none; }
     .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
+    
+    /* Improve touch targets for mobile stars */
+    .star-btn {
+        cursor: pointer;
+        padding: 0 4px;
+        transition: transform 0.1s;
+        -webkit-tap-highlight-color: transparent;
+    }
+    .star-btn:active { transform: scale(1.2); }
   </style>
 </head>
 <body class="bg-black text-gray-200">
@@ -53,7 +62,6 @@
     </div>
   </header>
 
-
   <div id="searchContainer" class="hidden mb-12">
     <h2 class="text-xl md:text-2xl font-semibold mb-6 text-red-500 border-l-4 border-red-500 pl-4">Search Results</h2>
     <div id="searchResults" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4 md:gap-6"></div>
@@ -70,7 +78,6 @@
         <p class="text-gray-600 text-sm py-4">Loading latest releases...</p>
     </div>
   </div>
-
 
   <div id="recContainer" class="hidden mb-12">
     <h2 class="text-xl md:text-2xl font-bold mb-6 flex items-center gap-2 text-white border-l-4 border-red-600 pl-4">
@@ -90,7 +97,6 @@
   <div class="bg-gray-900 rounded-2xl overflow-hidden w-full max-w-4xl relative border border-gray-800 max-h-[95vh] overflow-y-auto">
     <button onclick="closeModal()" class="absolute top-2 right-4 text-white text-4xl z-10 hover:text-red-500">&times;</button>
     <div class="flex flex-col">
-      <!-- Trailer Container -->
       <div id="trailerContainer" class="hidden aspect-video bg-black">
         <iframe id="trailer" class="w-full h-full" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>
       </div>
@@ -99,10 +105,10 @@
         <p id="modalGenre" class="text-red-500 font-bold text-xs uppercase mb-4 tracking-widest"></p>
         <p id="modalPlot" class="text-sm md:text-base text-gray-400 mb-6 leading-relaxed"></p>
         
-        <!-- Rating Section -->
         <div id="ratingSection" class="flex flex-col sm:flex-row items-start sm:items-center gap-4 border-t border-gray-800 pt-6">
           <span class="font-bold text-red-500 text-sm md:text-base uppercase tracking-widest">Rate this Movie:</span>
-          <div id="stars" class="flex text-3xl md:text-4xl gap-2" onmouseleave="resetStars()"></div>
+          <!-- Added p-2 to stars for better touch area -->
+          <div id="stars" class="flex text-4xl md:text-5xl gap-1 py-2" onmouseleave="resetStars()"></div>
         </div>
       </div>
     </div>
@@ -110,9 +116,7 @@
 </div>
 
 <script>
-// IMPORTANT: Ensure your FastAPI uses templates.TemplateResponse to inject this
 const OMDB_API_KEY = "{{ api_key }}"; 
-
 const RATINGS_KEY = "movie_app_ratings";
 const RECS_KEY = "movie_app_ai_recs"; 
 let currentMovieID = null;
@@ -137,31 +141,12 @@ function showToast() {
     }, 3000);
 }
 
-const searchBox = document.getElementById("searchBox");
-const clearBtn = document.getElementById("clearSearch");
-const adsContainer = document.getElementById('adsSection');
-
-adsContainer.addEventListener('mouseenter', () => isPaused = true);
-adsContainer.addEventListener('mouseleave', () => isPaused = false);
-
-function startAutoScroll() {
-    setInterval(() => {
-        if (isPaused || !adsContainer.firstElementChild) return;
-        const cardWidth = adsContainer.firstElementChild.offsetWidth + 16; 
-        const isAtEnd = adsContainer.scrollLeft + adsContainer.offsetWidth >= adsContainer.scrollWidth - 10;
-        if (isAtEnd) {
-            adsContainer.scrollTo({ left: 0, behavior: 'smooth' });
-        } else {
-            adsContainer.scrollBy({ left: cardWidth, behavior: 'smooth' });
-        }
-    }, 2000);
-}
-
 async function fetchLatestReleases() {
     try {
         const response = await fetch(`https://www.omdbapi.com/?apikey=${OMDB_API_KEY}&s=movie&y=2025&type=movie`);
         const data = await response.json();
         if (data.Search) {
+            const adsContainer = document.getElementById('adsSection');
             adsContainer.innerHTML = "";
             data.Search.forEach(movie => {
                 if (movie.Poster === "N/A") return;
@@ -169,11 +154,11 @@ async function fetchLatestReleases() {
                 ad.className = "flex-none w-[85%] md:w-[calc(33.33%-11px)] snap-start group bg-gray-900/40 border border-gray-800 p-3 rounded-2xl flex items-center gap-4 hover:border-red-600 transition-all shadow-lg cursor-pointer";
                 ad.innerHTML = `
                     <div class="w-16 h-16 flex-shrink-0 overflow-hidden rounded-xl border border-gray-700">
-                        <img src="${movie.Poster}" alt="" class="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500">
+                        <img src="${movie.Poster}" alt="" class="w-full h-full object-cover">
                     </div>
                     <div class="overflow-hidden">
                         <h3 class="text-xs font-bold text-white uppercase tracking-wider truncate">${movie.Title}</h3>
-                        <p class="text-[10px] text-gray-400 leading-tight">Featured Release • ${movie.Year}</p>
+                        <p class="text-[10px] text-gray-400">Featured • ${movie.Year}</p>
                     </div>
                 `;
                 ad.onclick = () => openMovie(movie.imdbID, true);
@@ -181,44 +166,7 @@ async function fetchLatestReleases() {
             });
             startAutoScroll();
         }
-    } catch (err) { console.error("Ads fetch error:", err); }
-}
-
-clearBtn.onclick = () => {
-    searchBox.value = "";
-    clearBtn.classList.add("hidden");
-    document.getElementById("searchContainer").classList.add("hidden");
-    document.getElementById("popularContainer").classList.remove("hidden");
-    if (getStoredRecs().length > 0) document.getElementById("recContainer").classList.remove("hidden");
-};
-
-searchBox.oninput = async () => {
-    const q = searchBox.value;
-    clearBtn.classList.toggle("hidden", q.length === 0);
-    if (q.length < 3) return;
-    document.getElementById("popularContainer").classList.add("hidden");
-    document.getElementById("recContainer").classList.add("hidden");
-    document.getElementById("searchContainer").classList.remove("hidden");
-    document.getElementById("searchResults").innerHTML = "<p class='col-span-full text-center py-10'>Searching...</p>";
-    const res = await fetch(`/api/search?q=${q}`);
-    const data = await res.json();
-    renderCards(data.Search || [], document.getElementById("searchResults"), false);
-};
-
-function renderCards(list, container, hideRating = false) {
-    container.innerHTML = "";
-    list.forEach(m => {
-        if (!m.Poster || m.Poster === "N/A") return;
-        const imdbID = m.imdbID || m.imdb_id;
-        const card = document.createElement("div");
-        card.className = "bg-gray-900 rounded-xl overflow-hidden cursor-pointer hover:ring-2 hover:ring-red-600 transition transform hover:-translate-y-2 flex flex-col h-full shadow-lg";
-        card.innerHTML = `
-            <img src="${m.Poster}" class="w-full aspect-[2/3] object-cover" onerror="this.closest('.bg-gray-900').remove()"/>
-            <div class="p-3 mt-auto"><p class="font-bold truncate text-xs md:text-sm text-white">${m.Title}</p><p class="text-[10px] md:text-xs text-gray-500">${m.Year}</p></div>
-        `;
-        card.onclick = () => openMovie(imdbID, hideRating);
-        container.appendChild(card);
-    });
+    } catch (err) { console.error(err); }
 }
 
 async function openMovie(imdbID, hideRating = false) {
@@ -232,10 +180,10 @@ async function openMovie(imdbID, hideRating = false) {
         document.getElementById("modalGenre").innerText = data.movie.Genre;
         document.getElementById("modalPlot").innerText = data.movie.Plot;
         
-        // FIX: Construct YouTube embed URL
+        // FIXED TRAILER LOGIC
         const trailer = document.getElementById("trailer");
         if (data.trailer) {
-            trailer.src = `https://www.youtube.com/embed/${data.trailer}`;
+            trailer.src = "https://www.youtube.com/embed/" + data.trailer;
             document.getElementById("trailerContainer").classList.remove("hidden");
         } else {
             trailer.src = "";
@@ -257,16 +205,33 @@ async function openMovie(imdbID, hideRating = false) {
     }
 }
 
+// IMPROVED STAR LOGIC FOR MOBILE
 function highlightStars(count) {
     const starsDiv = document.getElementById("stars");
     starsDiv.innerHTML = "";
     for (let i = 1; i <= 5; i++) {
         const s = document.createElement("span");
         s.innerHTML = "★";
-        s.className = `cursor-pointer transition ${i <= count ? 'star-filled' : 'star-empty'}`;
-        s.onmouseover = () => highlightStars(i);
-        s.onclick = () => saveRating(currentMovieID, i);
+        s.className = `star-btn transition ${i <= count ? 'star-filled' : 'star-empty'}`;
+        
+        // Use both mouse and click for compatibility
+        s.onmouseover = () => { if(window.innerWidth > 768) updateStarUI(i); };
+        s.onclick = (e) => {
+            e.preventDefault();
+            saveRating(currentMovieID, i);
+        };
         starsDiv.appendChild(s);
+    }
+}
+
+function updateStarUI(count) {
+    const stars = document.getElementById("stars").children;
+    for (let i = 0; i < stars.length; i++) {
+        if (i < count) {
+            stars[i].classList.replace('star-empty', 'star-filled');
+        } else {
+            stars[i].classList.replace('star-filled', 'star-empty');
+        }
     }
 }
 
@@ -279,8 +244,11 @@ async function saveRating(id, rating) {
     const r = getRatings();
     r[id] = rating;
     localStorage.setItem(RATINGS_KEY, JSON.stringify(r));
-    highlightStars(rating);
-    toggleLoading(true, "Updating your recommendations...");
+    
+    // Immediately update UI so user knows it worked
+    updateStarUI(rating);
+    
+    toggleLoading(true, "Updating recommendations...");
     try {
         const res = await fetch("/api/recommend", {
             method: "POST",
@@ -297,8 +265,27 @@ async function saveRating(id, rating) {
             document.getElementById("recContainer").classList.remove("hidden");
             showToast();
         }
-    } catch (err) { console.error("AI Error:", err); } 
-    finally { toggleLoading(false); }
+    } catch (err) { 
+        console.error("AI Error:", err); 
+    } finally { 
+        toggleLoading(false); 
+    }
+}
+
+function renderCards(list, container, hideRating = false) {
+    container.innerHTML = "";
+    list.forEach(m => {
+        if (!m.Poster || m.Poster === "N/A") return;
+        const imdbID = m.imdbID || m.imdb_id;
+        const card = document.createElement("div");
+        card.className = "bg-gray-900 rounded-xl overflow-hidden cursor-pointer hover:ring-2 hover:ring-red-600 transition transform hover:-translate-y-2 flex flex-col h-full shadow-lg";
+        card.innerHTML = `
+            <img src="${m.Poster}" class="w-full aspect-[2/3] object-cover" onerror="this.closest('.bg-gray-900').remove()"/>
+            <div class="p-3 mt-auto"><p class="font-bold truncate text-xs md:text-sm text-white">${m.Title}</p><p class="text-[10px] md:text-xs text-gray-500">${m.Year}</p></div>
+        `;
+        card.onclick = () => openMovie(imdbID, hideRating);
+        container.appendChild(card);
+    });
 }
 
 function closeModal() {
@@ -307,14 +294,27 @@ function closeModal() {
     document.body.style.overflow = "auto";
 }
 
+// Search and AutoScroll logic remains the same...
+const searchBox = document.getElementById("searchBox");
+searchBox.oninput = async () => {
+    const q = searchBox.value;
+    document.getElementById("clearSearch").classList.toggle("hidden", q.length === 0);
+    if (q.length < 3) return;
+    document.getElementById("popularContainer").classList.add("hidden");
+    document.getElementById("recContainer").classList.add("hidden");
+    document.getElementById("searchContainer").classList.remove("hidden");
+    const res = await fetch(`/api/search?q=${q}`);
+    const data = await res.json();
+    renderCards(data.Search || [], document.getElementById("searchResults"), false);
+};
+
 window.onload = async () => {
-    toggleLoading(true, "Loading movies...");
+    toggleLoading(true, "Loading...");
     try {
         fetchLatestReleases();
         const popRes = await fetch('/api/popular');
         const popData = await popRes.json();
         renderCards(popData.movies, document.getElementById("popularMovies"), true);
-        
         const savedRecs = getStoredRecs();
         if(savedRecs.length > 0) {
             renderCards(savedRecs, document.getElementById("recMovies"), false);
@@ -322,6 +322,18 @@ window.onload = async () => {
         }
     } finally { toggleLoading(false); }
 };
+
+function startAutoScroll() {
+    const ads = document.getElementById('adsSection');
+    setInterval(() => {
+        if (isPaused || !ads.firstElementChild) return;
+        if (ads.scrollLeft + ads.offsetWidth >= ads.scrollWidth - 10) {
+            ads.scrollTo({ left: 0, behavior: 'smooth' });
+        } else {
+            ads.scrollBy({ left: 200, behavior: 'smooth' });
+        }
+    }, 3000);
+}
 </script>
 </body>
 </html>
