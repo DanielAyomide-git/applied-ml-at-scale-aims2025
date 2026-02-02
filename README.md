@@ -1,8 +1,6 @@
 # Architecting a Scalable Recommender System: From ALS to Production-Ready API
 
 [![Live Demo](https://img.shields.io/badge/Demo-Live%20on%20Render-red?style=for-the-badge&logo=render)](https://aims-danflix.onrender.com)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=for-the-badge)](https://opensource.org/licenses/MIT)
-[![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg?style=for-the-badge&logo=python)](https://www.python.org/downloads/)
 
 This repository contains the end-to-end implementation of a high-performance movie recommender system as detailed in the paper: **"Architecting a Scalable Recommender System: From Alternating Least Squares to Production-Ready API"**.
 
