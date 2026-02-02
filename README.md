@@ -78,7 +78,6 @@ The model successfully recovers the latent taxonomy of the film industry purely 
 **Daniel Ayomide Olanrewaju**  
 African Institute for Mathematical Sciences (AIMS) South Africa  
 📧 [dolan@aims.ac.za](mailto:dolan@aims.ac.za)  
-🔗 [GitHub Profile](https://github.com/DanielAyomide-git)
 📖 [Full report](https://drive.google.com/file/d/10-olluNlcIU9yN20eoXX-PLTdTyBURji/view?usp=drive_link)
 
 ---
