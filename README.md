@@ -79,7 +79,7 @@ The model successfully recovers the latent taxonomy of the film industry purely 
 African Institute for Mathematical Sciences (AIMS) South Africa  
 📧 [dolan@aims.ac.za](mailto:dolan@aims.ac.za)  
 🔗 [GitHub Profile](https://github.com/DanielAyomide-git)
- [Full report](https://drive.google.com/file/d/10-olluNlcIU9yN20eoXX-PLTdTyBURji/view?usp=drive_link)
+📖 [Full report](https://drive.google.com/file/d/10-olluNlcIU9yN20eoXX-PLTdTyBURji/view?usp=drive_link)
 
 ---
 *Note: This project was developed as part of the Applied Machine Learning at Scale course at AIMS South Africa (2025).*
